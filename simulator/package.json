@@ -2,12 +2,16 @@
   "name": "simulator",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "deviceSimulator.js",
   "scripts": {
+    "start": "node deviceSimulator.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs"
+  "type": "commonjs",
+  "dependencies": {
+    "socket.io-client": "^4.8.3"
+  }
 }

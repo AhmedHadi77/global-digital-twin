@@ -1,0 +1,127 @@
+{
+  "statusOptions": ["Online", "Offline"],
+  "locationOptions": ["Factory A", "Factory B", "Warehouse", "Lab"],
+  "alertTypes": ["OFFLINE", "OVERHEAT", "LOW_BATTERY", "ANOMALY"],
+  "controlActions": {
+    "triggerOffline": "TRIGGER_OFFLINE",
+    "triggerOverheat": "TRIGGER_OVERHEAT",
+    "triggerLowBattery": "TRIGGER_LOW_BATTERY",
+    "triggerTempSpike": "TRIGGER_TEMP_SPIKE",
+    "recoverDevice": "RECOVER_DEVICE",
+    "setRandomFailureRate": "SET_RANDOM_FAILURE_RATE"
+  },
+  "thresholds": {
+    "offlineMs": 5000,
+    "overheat": 80,
+    "lowBattery": 15,
+    "historyLimit": 18,
+    "tempAnomalyDelta": 12,
+    "vibrationAnomalyDelta": 0.9
+  },
+  "deviceCatalog": [
+    {
+      "deviceId": "device-1",
+      "name": "Press Arm Controller",
+      "deviceType": "Robotic Press",
+      "location": "Factory A",
+      "baseTemperature": 72.5,
+      "baseVibration": 1.12,
+      "baseBatteryLevel": 96,
+      "tempSpikeChance": 0.28,
+      "tempSpikeBoost": 14,
+      "vibrationSpikeChance": 0.08,
+      "vibrationSpikeBoost": 0.34
+    },
+    {
+      "deviceId": "device-2",
+      "name": "Mixer Core Unit",
+      "deviceType": "Industrial Mixer",
+      "location": "Factory A",
+      "baseTemperature": 41.6,
+      "baseVibration": 0.48,
+      "baseBatteryLevel": 92,
+      "tempSpikeChance": 0.06,
+      "tempSpikeBoost": 8,
+      "vibrationSpikeChance": 0.05,
+      "vibrationSpikeBoost": 0.24
+    },
+    {
+      "deviceId": "device-3",
+      "name": "Packaging Sensor Hub",
+      "deviceType": "Sensor Cluster",
+      "location": "Factory B",
+      "baseTemperature": 52.4,
+      "baseVibration": 0.84,
+      "baseBatteryLevel": 94,
+      "tempSpikeChance": 0.08,
+      "tempSpikeBoost": 10,
+      "vibrationSpikeChance": 0.08,
+      "vibrationSpikeBoost": 0.38
+    },
+    {
+      "deviceId": "device-4",
+      "name": "Conveyor Edge Node",
+      "deviceType": "Conveyor Monitor",
+      "location": "Factory B",
+      "baseTemperature": 48.9,
+      "baseVibration": 1.39,
+      "baseBatteryLevel": 89,
+      "tempSpikeChance": 0.08,
+      "tempSpikeBoost": 9,
+      "vibrationSpikeChance": 0.22,
+      "vibrationSpikeBoost": 1.05
+    },
+    {
+      "deviceId": "device-5",
+      "name": "Storage Climate Unit",
+      "deviceType": "Warehouse Sensor",
+      "location": "Warehouse",
+      "baseTemperature": 24.8,
+      "baseVibration": 0.18,
+      "baseBatteryLevel": 99,
+      "tempSpikeChance": 0.03,
+      "tempSpikeBoost": 5,
+      "vibrationSpikeChance": 0.03,
+      "vibrationSpikeBoost": 0.11
+    },
+    {
+      "deviceId": "device-6",
+      "name": "Forklift Beacon",
+      "deviceType": "Tracking Beacon",
+      "location": "Warehouse",
+      "baseTemperature": 31.2,
+      "baseVibration": 0.57,
+      "baseBatteryLevel": 87,
+      "tempSpikeChance": 0.05,
+      "tempSpikeBoost": 6,
+      "vibrationSpikeChance": 0.05,
+      "vibrationSpikeBoost": 0.28
+    },
+    {
+      "deviceId": "device-7",
+      "name": "Quality Bench Scanner",
+      "deviceType": "Inspection Scanner",
+      "location": "Lab",
+      "baseTemperature": 27.5,
+      "baseVibration": 0.22,
+      "baseBatteryLevel": 91,
+      "tempSpikeChance": 0.03,
+      "tempSpikeBoost": 5,
+      "vibrationSpikeChance": 0.04,
+      "vibrationSpikeBoost": 0.14
+    },
+    {
+      "deviceId": "device-8",
+      "name": "Prototype Test Rig",
+      "deviceType": "Validation Rig",
+      "location": "Lab",
+      "baseTemperature": 22.1,
+      "baseVibration": 0.11,
+      "baseBatteryLevel": 93,
+      "tempSpikeChance": 0.05,
+      "tempSpikeBoost": 6,
+      "vibrationSpikeChance": 0.05,
+      "vibrationSpikeBoost": 0.18
+    }
+  ]
+}
