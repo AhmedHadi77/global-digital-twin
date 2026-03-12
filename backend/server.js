@@ -38,23 +38,35 @@ const appPool = new Pool({
   host: process.env.DB_HOST,
   database: process.env.DB_NAME,
   password: process.env.DB_PASSWORD,
-  port: process.env.DB_PORT,
+  port: Number(process.env.DB_PORT || 5432),
+  ssl:
+    process.env.DB_SSL === "true"
+      ? { rejectUnauthorized: false }
+      : undefined,
 });
 
-app.use(
-  cors({
-    origin: "http://localhost:3000",
-    methods: ["GET", "POST"],
-  })
-);
 
+const rawOrigins = process.env.FRONTEND_URLS || "http://localhost:3000";
+const allowAllOrigins = rawOrigins === "*";
+const allowedOrigins = rawOrigins.split(",").map((value) => value.trim());
+
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin || allowAllOrigins || allowedOrigins.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+
+    callback(new Error(`Origin not allowed: ${origin}`));
+  },
+  methods: ["GET", "POST"],
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 const io = new Server(server, {
-  cors: {
-    origin: "http://localhost:3000",
-    methods: ["GET", "POST"],
-  },
+  cors: corsOptions,
 });
 
 function createInitialDeviceState(device) {
