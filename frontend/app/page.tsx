@@ -133,59 +133,156 @@ export default function DashboardPage() {
   const [controlBusy, setControlBusy] = useState(false);
 
   async function refreshSummary() {
+  try {
     const response = await fetch(`${API_BASE}/summary`, { cache: "no-store" });
+
+    if (!response.ok) {
+      return false;
+    }
+
     const data = await response.json();
     setSummary(data);
     setRandomFailureRateInput(Math.round(data.randomFailureRate * 100));
+    setConnected(true);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function applyDeviceData(data: Device[]) {
+  setDevices(data);
+
+  const nextPoint: ChartPoint = {
+    time: new Date().toLocaleTimeString(),
+  };
+
+  data.forEach((device) => {
+    nextPoint[`${device.deviceId}_temperature`] = device.temperature;
+    nextPoint[`${device.deviceId}_battery`] = device.batteryLevel;
+  });
+
+  setHistory((prev) => [...prev.slice(-23), nextPoint]);
+
+  setSelectedDeviceId((current) => current ?? data[0]?.deviceId ?? null);
+  setControlDeviceId((current) => current || data[0]?.deviceId || "");
+}
+
+async function refreshDevices() {
+  try {
+    const response = await fetch(`${API_BASE}/devices`, { cache: "no-store" });
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const data = await response.json();
+    applyDeviceData(data);
+    setConnected(true);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function refreshAlerts() {
+  try {
+    const response = await fetch(`${API_BASE}/alerts`, { cache: "no-store" });
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const data = await response.json();
+    setAlerts(data);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+
+useEffect(() => {
+  let isMounted = true;
+
+  async function loadInitialData() {
+    const summaryOk = await refreshSummary();
+    const devicesOk = await refreshDevices();
+    await refreshAlerts();
+
+    if (!summaryOk && !devicesOk && isMounted) {
+      setConnected(false);
+    }
   }
 
-  useEffect(() => {
-    refreshSummary().catch(() => {});
+  loadInitialData().catch(() => {
+    if (isMounted) {
+      setConnected(false);
+    }
+  });
 
-    socket = io(API_BASE, {
-      transports: ["websocket"],
-    });
+  socket = io(API_BASE, {
+    path: "/socket.io",
+    transports: ["polling", "websocket"],
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 1500,
+    timeout: 20000,
+  });
 
-    socket.on("connect", () => setConnected(true));
-    socket.on("disconnect", () => setConnected(false));
+  socket.on("connect", () => {
+    if (isMounted) {
+      setConnected(true);
+    }
+  });
 
-    socket.on("update_ui", (data: Device[]) => {
-      setDevices(data);
+  socket.on("connect_error", () => {
+    if (isMounted) {
+      setConnected(false);
+    }
+  });
 
-      const nextPoint: ChartPoint = {
-        time: new Date().toLocaleTimeString(),
-      };
+  socket.on("disconnect", () => {
+    if (isMounted) {
+      setConnected(false);
+    }
+  });
 
-      data.forEach((device) => {
-        nextPoint[`${device.deviceId}_temperature`] = device.temperature;
-        nextPoint[`${device.deviceId}_battery`] = device.batteryLevel;
-      });
+  socket.on("update_ui", (data: Device[]) => {
+    if (!isMounted) {
+      return;
+    }
 
-      setHistory((prev) => [...prev.slice(-23), nextPoint]);
+    applyDeviceData(data);
+    setConnected(true);
+  });
 
-      if (!selectedDeviceId && data.length > 0) {
-        setSelectedDeviceId(data[0].deviceId);
-      }
+  socket.on("alerts_update", (data: AlertItem[]) => {
+    if (!isMounted) {
+      return;
+    }
 
-      if (!controlDeviceId && data.length > 0) {
-        setControlDeviceId(data[0].deviceId);
-      }
-    });
+    setAlerts(data);
+  });
 
-    socket.on("alerts_update", (data: AlertItem[]) => {
-      setAlerts(data);
-    });
+  const interval = setInterval(async () => {
+    const summaryOk = await refreshSummary();
+    const devicesOk = await refreshDevices();
+    await refreshAlerts();
 
-    const interval = setInterval(() => {
-      refreshSummary().catch(() => {});
-    }, 10000);
+    if (!summaryOk && !devicesOk && isMounted) {
+      setConnected(false);
+    }
+  }, 15000);
 
-    return () => {
-      clearInterval(interval);
-      socket?.disconnect();
-      socket = null;
-    };
-  }, [selectedDeviceId, controlDeviceId]);
+  return () => {
+    isMounted = false;
+    clearInterval(interval);
+    socket?.disconnect();
+    socket = null;
+  };
+}, []);
+
 
   const filteredDevices = devices.filter((device) => {
     const query = searchQuery.trim().toLowerCase();

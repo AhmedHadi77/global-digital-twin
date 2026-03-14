@@ -750,6 +750,9 @@ app.get("/summary", async (req, res) => {
 app.get("/devices", (req, res) => {
   res.json(getDevicesSnapshot());
 });
+app.get("/alerts", (req, res) => {
+  res.json(getAlertsSnapshot());
+});
 
 app.get("/devices/:deviceId/details", async (req, res) => {
   const { deviceId } = req.params;
