@@ -2,13 +2,13 @@
 node_modules/
 **/node_modules/
 
-# env files
+# environment files
 .env
 .env.*
 !.env.example
 !.env.local.example
 
-# next
+# Next.js
 .next/
 out/
 
@@ -18,7 +18,12 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# editor / OS
+# build artifacts
+dist/
+build/
+coverage/
+
+# editor and OS files
 .vscode/
 .idea/
 .DS_Store
