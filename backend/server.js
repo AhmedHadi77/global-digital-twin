@@ -10,12 +10,7 @@ const model = require("../shared/deviceModel.json");
 const app = express();
 const server = http.createServer(app);
 
-const {
-  deviceCatalog,
-  thresholds,
-  alertTypes,
-  controlActions,
-} = model;
+const { deviceCatalog, thresholds, controlActions } = model;
 
 const STATUS = {
   ONLINE: "Online",
@@ -33,6 +28,9 @@ const ANOMALY = {
   DETECTED: "ANOMALY",
 };
 
+const RUN_EMBEDDED_SIMULATOR =
+  process.env.RUN_EMBEDDED_SIMULATOR === "true";
+
 const appPool = new Pool({
   user: process.env.DB_USER,
   host: process.env.DB_HOST,
@@ -44,7 +42,6 @@ const appPool = new Pool({
       ? { rejectUnauthorized: false }
       : undefined,
 });
-
 
 const rawOrigins = process.env.FRONTEND_URLS || "http://localhost:3000";
 const allowAllOrigins = rawOrigins === "*";
@@ -88,9 +85,21 @@ function createInitialDeviceState(device) {
   };
 }
 
-const catalogMap = new Map(deviceCatalog.map((device) => [device.deviceId, device]));
-const virtualDevices = new Map(deviceCatalog.map((device) => [device.deviceId, createInitialDeviceState(device)]));
-const recentReadings = new Map(deviceCatalog.map((device) => [device.deviceId, []]));
+const catalogMap = new Map(
+  deviceCatalog.map((device) => [device.deviceId, device])
+);
+
+const virtualDevices = new Map(
+  deviceCatalog.map((device) => [
+    device.deviceId,
+    createInitialDeviceState(device),
+  ])
+);
+
+const recentReadings = new Map(
+  deviceCatalog.map((device) => [device.deviceId, []])
+);
+
 const activeAlerts = new Map();
 
 const simulationState = {
@@ -98,13 +107,23 @@ const simulationState = {
   deviceOverrides: new Map(),
 };
 
+const embeddedSimulatorDevices = deviceCatalog.map((device) => ({
+  ...device,
+  active: true,
+  batteryLevel: device.baseBatteryLevel,
+}));
+
+let embeddedSimulatorStarted = false;
+
 function getOverride(deviceId) {
-  return simulationState.deviceOverrides.get(deviceId) ?? {
-    forceOffline: false,
-    forceOverheat: false,
-    forceLowBattery: false,
-    forceTempSpike: false,
-  };
+  return (
+    simulationState.deviceOverrides.get(deviceId) ?? {
+      forceOffline: false,
+      forceOverheat: false,
+      forceLowBattery: false,
+      forceTempSpike: false,
+    }
+  );
 }
 
 function setOverride(deviceId, nextValue) {
@@ -117,7 +136,9 @@ function clearOverride(deviceId) {
 }
 
 function calculateStatus(lastUpdate) {
-  if (!lastUpdate) return STATUS.OFFLINE;
+  if (!lastUpdate) {
+    return STATUS.OFFLINE;
+  }
 
   const age = Date.now() - new Date(lastUpdate).getTime();
   return age > thresholds.offlineMs ? STATUS.OFFLINE : STATUS.ONLINE;
@@ -206,7 +227,10 @@ function applySimulationControls(deviceId, reading) {
     reading: {
       temperature: normalizeNumber(temperature, 1),
       vibration: normalizeNumber(Math.max(vibration, 0.05), 2),
-      batteryLevel: normalizeNumber(Math.min(Math.max(batteryLevel, 1), 100), 1),
+      batteryLevel: normalizeNumber(
+        Math.min(Math.max(batteryLevel, 1), 100),
+        1
+      ),
     },
   };
 }
@@ -224,7 +248,9 @@ function detectAnomaly(deviceId, nextReading) {
   const averageVibration =
     history.reduce((sum, item) => sum + item.vibration, 0) / history.length;
 
-  const temperatureDelta = Math.abs(nextReading.temperature - averageTemperature);
+  const temperatureDelta = Math.abs(
+    nextReading.temperature - averageTemperature
+  );
   const vibrationDelta = Math.abs(nextReading.vibration - averageVibration);
 
   if (
@@ -247,8 +273,14 @@ function detectAnomaly(deviceId, nextReading) {
       vibrationDelta >= thresholds.vibrationAnomalyDelta
         ? "Temperature and vibration moved sharply away from the recent baseline."
         : temperatureDelta >= thresholds.tempAnomalyDelta
-          ? `Temperature deviated by ${normalizeNumber(temperatureDelta, 1)} C from baseline.`
-          : `Vibration deviated by ${normalizeNumber(vibrationDelta, 2)} Hz from baseline.`,
+          ? `Temperature deviated by ${normalizeNumber(
+              temperatureDelta,
+              1
+            )} C from baseline.`
+          : `Vibration deviated by ${normalizeNumber(
+              vibrationDelta,
+              2
+            )} Hz from baseline.`,
   };
 }
 
@@ -417,16 +449,18 @@ async function resolveAlert(type, deviceId) {
 function getAlertsSnapshot() {
   return Array.from(activeAlerts.values())
     .map(({ dbId, ...alert }) => alert)
-    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    .sort(
+      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    );
 }
 
 async function syncAlerts() {
   for (const device of virtualDevices.values()) {
     if (!device.lastUpdate) {
-      await resolveAlert(alertTypes[0], device.deviceId);
-      await resolveAlert(alertTypes[1], device.deviceId);
-      await resolveAlert(alertTypes[2], device.deviceId);
-      await resolveAlert(alertTypes[3], device.deviceId);
+      await resolveAlert("OFFLINE", device.deviceId);
+      await resolveAlert("OVERHEAT", device.deviceId);
+      await resolveAlert("LOW_BATTERY", device.deviceId);
+      await resolveAlert("ANOMALY", device.deviceId);
       continue;
     }
 
@@ -541,11 +575,155 @@ async function getAnomaliesTodayCount() {
   }
 }
 
+function varyValue(base, variance, decimals) {
+  const value = base + (Math.random() * variance * 2 - variance);
+  return Number(value.toFixed(decimals));
+}
+
+function buildEmbeddedPayload(device) {
+  device.batteryLevel = Math.max(
+    8,
+    Number((device.batteryLevel - Math.random() * 0.45).toFixed(1))
+  );
+
+  if (device.batteryLevel <= 12 && Math.random() < 0.08) {
+    device.batteryLevel = device.baseBatteryLevel;
+  }
+
+  const temperatureBase =
+    Math.random() < device.tempSpikeChance
+      ? device.baseTemperature + device.tempSpikeBoost
+      : device.baseTemperature;
+
+  const vibrationBase =
+    Math.random() < device.vibrationSpikeChance
+      ? device.baseVibration + device.vibrationSpikeBoost
+      : device.baseVibration;
+
+  return {
+    deviceId: device.deviceId,
+    name: device.name,
+    deviceType: device.deviceType,
+    location: device.location,
+    temperature: varyValue(temperatureBase, 3.2, 1),
+    vibration: Math.max(0.05, varyValue(vibrationBase, 0.22, 2)),
+    batteryLevel: device.batteryLevel,
+  };
+}
+
+async function processTelemetry(payload) {
+  const baseDevice = catalogMap.get(payload.deviceId);
+
+  if (!baseDevice) {
+    return;
+  }
+
+  const rawReading = {
+    temperature: Number(payload.temperature),
+    vibration: Number(payload.vibration),
+    batteryLevel: Number(payload.batteryLevel),
+  };
+
+  if (
+    !Number.isFinite(rawReading.temperature) ||
+    !Number.isFinite(rawReading.vibration) ||
+    !Number.isFinite(rawReading.batteryLevel)
+  ) {
+    console.warn("Invalid telemetry payload received:", payload);
+    return;
+  }
+
+  const simulated = applySimulationControls(payload.deviceId, rawReading);
+
+  if (simulated.dropped) {
+    return;
+  }
+
+  const reading = simulated.reading;
+  const anomaly = detectAnomaly(payload.deviceId, reading);
+  const healthStatus = calculateHealth(
+    reading.temperature,
+    reading.batteryLevel
+  );
+
+  const nextState = {
+    deviceId: baseDevice.deviceId,
+    name: baseDevice.name,
+    deviceType: baseDevice.deviceType,
+    location: baseDevice.location,
+    temperature: reading.temperature,
+    vibration: reading.vibration,
+    batteryLevel: reading.batteryLevel,
+    status: STATUS.ONLINE,
+    healthStatus,
+    anomalyState: anomaly ? ANOMALY.DETECTED : ANOMALY.STABLE,
+    anomalyReason: anomaly ? anomaly.reason : null,
+    anomalyScore: anomaly ? anomaly.score : 0,
+    activeAlerts: 0,
+    lastUpdate: new Date().toISOString(),
+  };
+
+  virtualDevices.set(baseDevice.deviceId, nextState);
+  pushRecentReading(baseDevice.deviceId, reading);
+
+  await persistReading(buildDeviceSnapshot(nextState));
+  await emitSnapshots();
+}
+
+function startEmbeddedSimulator() {
+  if (embeddedSimulatorStarted) {
+    return;
+  }
+
+  embeddedSimulatorStarted = true;
+  console.log("Embedded simulator enabled");
+
+  embeddedSimulatorDevices.forEach((device) => {
+    if (device.active) {
+      processTelemetry(buildEmbeddedPayload(device)).catch((error) => {
+        console.error("Embedded simulator send error:", error.message);
+      });
+    }
+  });
+
+  setInterval(() => {
+    embeddedSimulatorDevices.forEach((device) => {
+      if (device.active) {
+        processTelemetry(buildEmbeddedPayload(device)).catch((error) => {
+          console.error("Embedded simulator send error:", error.message);
+        });
+      }
+    });
+  }, 1500);
+
+  setInterval(() => {
+    const randomIndex = Math.floor(
+      Math.random() * embeddedSimulatorDevices.length
+    );
+    const device = embeddedSimulatorDevices[randomIndex];
+
+    device.active = !device.active;
+
+    console.log(
+      `[Embedded Simulator] ${device.deviceId} is now ${
+        device.active ? "ONLINE" : "OFFLINE"
+      }`
+    );
+
+    if (device.active) {
+      processTelemetry(buildEmbeddedPayload(device)).catch((error) => {
+        console.error("Embedded simulator send error:", error.message);
+      });
+    }
+  }, 10000);
+}
+
 app.get("/health", (req, res) => {
   res.json({
     status: "OK",
     devices: virtualDevices.size,
     alerts: activeAlerts.size,
+    embeddedSimulator: RUN_EMBEDDED_SIMULATOR,
   });
 });
 
@@ -554,9 +732,15 @@ app.get("/summary", async (req, res) => {
 
   res.json({
     totalDevices: devices.length,
-    onlineDevices: devices.filter((device) => device.status === STATUS.ONLINE).length,
-    offlineDevices: devices.filter((device) => device.status === STATUS.OFFLINE).length,
-    criticalDevices: devices.filter((device) => device.healthStatus === HEALTH.CRITICAL).length,
+    onlineDevices: devices.filter(
+      (device) => device.status === STATUS.ONLINE
+    ).length,
+    offlineDevices: devices.filter(
+      (device) => device.status === STATUS.OFFLINE
+    ).length,
+    criticalDevices: devices.filter(
+      (device) => device.healthStatus === HEALTH.CRITICAL
+    ).length,
     activeAlerts: getAlertsSnapshot().length,
     anomaliesDetectedToday: await getAnomaliesTodayCount(),
     randomFailureRate: simulationState.randomFailureRate,
@@ -569,7 +753,9 @@ app.get("/devices", (req, res) => {
 
 app.get("/devices/:deviceId/details", async (req, res) => {
   const { deviceId } = req.params;
-  const current = getDevicesSnapshot().find((device) => device.deviceId === deviceId);
+  const current = getDevicesSnapshot().find(
+    (device) => device.deviceId === deviceId
+  );
 
   if (!current) {
     res.status(404).json({ message: "Device not found" });
@@ -625,9 +811,14 @@ app.post("/simulate", async (req, res) => {
   if (action === controlActions.setRandomFailureRate) {
     const normalized = Number(value);
     simulationState.randomFailureRate =
-      normalized > 1 ? Math.min(Math.max(normalized / 100, 0), 1) : Math.min(Math.max(normalized, 0), 1);
+      normalized > 1
+        ? Math.min(Math.max(normalized / 100, 0), 1)
+        : Math.min(Math.max(normalized, 0), 1);
 
-    res.json({ ok: true, randomFailureRate: simulationState.randomFailureRate });
+    res.json({
+      ok: true,
+      randomFailureRate: simulationState.randomFailureRate,
+    });
     return;
   }
 
@@ -659,6 +850,7 @@ app.post("/simulate", async (req, res) => {
   }
 
   await emitSnapshots();
+
   res.json({
     ok: true,
     deviceId,
@@ -673,50 +865,7 @@ io.on("connection", (socket) => {
 
   socket.on("sensor_data", async (payload) => {
     try {
-      const baseDevice = catalogMap.get(payload.deviceId);
-
-      if (!baseDevice) {
-        return;
-      }
-
-      const rawReading = {
-        temperature: Number(payload.temperature),
-        vibration: Number(payload.vibration),
-        batteryLevel: Number(payload.batteryLevel),
-      };
-
-      const simulated = applySimulationControls(payload.deviceId, rawReading);
-
-      if (simulated.dropped) {
-        return;
-      }
-
-      const reading = simulated.reading;
-      const anomaly = detectAnomaly(payload.deviceId, reading);
-      const healthStatus = calculateHealth(reading.temperature, reading.batteryLevel);
-
-      const nextState = {
-        deviceId: baseDevice.deviceId,
-        name: baseDevice.name,
-        deviceType: baseDevice.deviceType,
-        location: baseDevice.location,
-        temperature: reading.temperature,
-        vibration: reading.vibration,
-        batteryLevel: reading.batteryLevel,
-        status: STATUS.ONLINE,
-        healthStatus,
-        anomalyState: anomaly ? ANOMALY.DETECTED : ANOMALY.STABLE,
-        anomalyReason: anomaly ? anomaly.reason : null,
-        anomalyScore: anomaly ? anomaly.score : 0,
-        activeAlerts: 0,
-        lastUpdate: new Date().toISOString(),
-      };
-
-      virtualDevices.set(baseDevice.deviceId, nextState);
-      pushRecentReading(baseDevice.deviceId, reading);
-
-      await persistReading(buildDeviceSnapshot(nextState));
-      await emitSnapshots();
+      await processTelemetry(payload);
     } catch (error) {
       console.error("Telemetry processing error:", error.message);
     }
@@ -740,4 +889,8 @@ server.listen(PORT, async () => {
   console.log("Waiting for simulator telemetry...");
   await testDatabase();
   await seedRegistry();
+
+  if (RUN_EMBEDDED_SIMULATOR) {
+    startEmbeddedSimulator();
+  }
 });
