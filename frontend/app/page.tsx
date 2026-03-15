@@ -26,9 +26,9 @@ import {
   YAxis,
 } from "recharts";
 import DigitalTwinScene from "@/components/DigitalTwinScene";
+import { API_BASE } from "@/lib/backendWarmup";
 import model from "@/lib/deviceModel";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
 const statusOptions = ["All", ...model.statusOptions];
 const locationOptions = ["All", ...model.locationOptions];
 const controlActions = model.controlActions;
@@ -87,9 +87,46 @@ interface ChartPoint {
   [key: string]: string | number | null;
 }
 
+interface DashboardCache {
+  summary: Summary;
+  devices: Device[];
+  alerts: AlertItem[];
+  history: ChartPoint[];
+  cachedAt: string;
+}
+
 let socket: Socket | null = null;
 
 const chartColors = ["#22d3ee", "#f59e0b", "#34d399", "#f97316", "#a78bfa", "#fb7185"];
+const DASHBOARD_CACHE_KEY = "gdt-dashboard-cache-v1";
+
+function readDashboardCache() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(DASHBOARD_CACHE_KEY);
+
+    if (!raw) {
+      return null;
+    }
+
+    return JSON.parse(raw) as DashboardCache;
+  } catch {
+    return null;
+  }
+}
+
+function writeDashboardCache(cache: DashboardCache) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify(cache));
+  } catch {}
+}
 
 function statusClasses(status: Device["status"]) {
   return status === "Online"
@@ -129,159 +166,192 @@ export default function DashboardPage() {
   const [controlDeviceId, setControlDeviceId] = useState("");
   const [randomFailureRateInput, setRandomFailureRateInput] = useState(8);
   const [connected, setConnected] = useState(false);
+  const [showingCachedData, setShowingCachedData] = useState(false);
   const [controlMessage, setControlMessage] = useState("");
   const [controlBusy, setControlBusy] = useState(false);
 
   async function refreshSummary() {
-  try {
-    const response = await fetch(`${API_BASE}/summary`, { cache: "no-store" });
+    try {
+      const response = await fetch(`${API_BASE}/summary`, { cache: "no-store" });
 
-    if (!response.ok) {
-      return false;
-    }
+      if (!response.ok) {
+        return false;
+      }
 
-    const data = await response.json();
-    setSummary(data);
-    setRandomFailureRateInput(Math.round(data.randomFailureRate * 100));
-    setConnected(true);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function applyDeviceData(data: Device[]) {
-  setDevices(data);
-
-  const nextPoint: ChartPoint = {
-    time: new Date().toLocaleTimeString(),
-  };
-
-  data.forEach((device) => {
-    nextPoint[`${device.deviceId}_temperature`] = device.temperature;
-    nextPoint[`${device.deviceId}_battery`] = device.batteryLevel;
-  });
-
-  setHistory((prev) => [...prev.slice(-23), nextPoint]);
-
-  setSelectedDeviceId((current) => current ?? data[0]?.deviceId ?? null);
-  setControlDeviceId((current) => current || data[0]?.deviceId || "");
-}
-
-async function refreshDevices() {
-  try {
-    const response = await fetch(`${API_BASE}/devices`, { cache: "no-store" });
-
-    if (!response.ok) {
-      return false;
-    }
-
-    const data = await response.json();
-    applyDeviceData(data);
-    setConnected(true);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function refreshAlerts() {
-  try {
-    const response = await fetch(`${API_BASE}/alerts`, { cache: "no-store" });
-
-    if (!response.ok) {
-      return false;
-    }
-
-    const data = await response.json();
-    setAlerts(data);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-
-useEffect(() => {
-  let isMounted = true;
-
-  async function loadInitialData() {
-    const summaryOk = await refreshSummary();
-    const devicesOk = await refreshDevices();
-    await refreshAlerts();
-
-    if (!summaryOk && !devicesOk && isMounted) {
-      setConnected(false);
-    }
-  }
-
-  loadInitialData().catch(() => {
-    if (isMounted) {
-      setConnected(false);
-    }
-  });
-
-  socket = io(API_BASE, {
-    path: "/socket.io",
-    transports: ["polling", "websocket"],
-    reconnection: true,
-    reconnectionAttempts: Infinity,
-    reconnectionDelay: 1500,
-    timeout: 20000,
-  });
-
-  socket.on("connect", () => {
-    if (isMounted) {
+      const data = await response.json();
+      setSummary(data);
+      setRandomFailureRateInput(Math.round(data.randomFailureRate * 100));
       setConnected(true);
+      return true;
+    } catch {
+      return false;
     }
-  });
+  }
 
-  socket.on("connect_error", () => {
-    if (isMounted) {
-      setConnected(false);
+  function applyDeviceData(data: Device[]) {
+    setDevices(data);
+    setShowingCachedData(false);
+
+    const nextPoint: ChartPoint = {
+      time: new Date().toLocaleTimeString(),
+    };
+
+    data.forEach((device) => {
+      nextPoint[`${device.deviceId}_temperature`] = device.temperature;
+      nextPoint[`${device.deviceId}_battery`] = device.batteryLevel;
+    });
+
+    setHistory((prev) => [...prev.slice(-23), nextPoint]);
+    setSelectedDeviceId((current) => current ?? data[0]?.deviceId ?? null);
+    setControlDeviceId((current) => current || data[0]?.deviceId || "");
+  }
+
+  async function refreshDevices() {
+    try {
+      const response = await fetch(`${API_BASE}/devices`, { cache: "no-store" });
+
+      if (!response.ok) {
+        return false;
+      }
+
+      const data = await response.json();
+      applyDeviceData(data);
+      setConnected(true);
+      return true;
+    } catch {
+      return false;
     }
-  });
+  }
 
-  socket.on("disconnect", () => {
-    if (isMounted) {
-      setConnected(false);
+  async function refreshAlerts() {
+    try {
+      const response = await fetch(`${API_BASE}/alerts`, { cache: "no-store" });
+
+      if (!response.ok) {
+        return false;
+      }
+
+      const data = await response.json();
+      setAlerts(data);
+      return true;
+    } catch {
+      return false;
     }
-  });
+  }
 
-  socket.on("update_ui", (data: Device[]) => {
-    if (!isMounted) {
+  useEffect(() => {
+    const cached = readDashboardCache();
+
+    if (!cached) {
       return;
     }
 
-    applyDeviceData(data);
-    setConnected(true);
-  });
+    setSummary(cached.summary);
+    setDevices(cached.devices);
+    setAlerts(cached.alerts);
+    setHistory(cached.history);
+    setSelectedDeviceId(cached.devices[0]?.deviceId ?? null);
+    setControlDeviceId(cached.devices[0]?.deviceId ?? "");
+    setRandomFailureRateInput(
+      Math.round(cached.summary.randomFailureRate * 100)
+    );
+    setShowingCachedData(true);
+  }, []);
 
-  socket.on("alerts_update", (data: AlertItem[]) => {
-    if (!isMounted) {
+  useEffect(() => {
+    if (devices.length === 0 && alerts.length === 0 && history.length === 0) {
       return;
     }
 
-    setAlerts(data);
-  });
+    writeDashboardCache({
+      summary,
+      devices,
+      alerts,
+      history,
+      cachedAt: new Date().toISOString(),
+    });
+  }, [alerts, devices, history, summary]);
 
-  const interval = setInterval(async () => {
-    const summaryOk = await refreshSummary();
-    const devicesOk = await refreshDevices();
-    await refreshAlerts();
+  useEffect(() => {
+    let isMounted = true;
 
-    if (!summaryOk && !devicesOk && isMounted) {
-      setConnected(false);
+    async function loadInitialData() {
+      const summaryOk = await refreshSummary();
+      const devicesOk = await refreshDevices();
+      await refreshAlerts();
+
+      if (!summaryOk && !devicesOk && isMounted) {
+        setConnected(false);
+      }
     }
-  }, 15000);
 
-  return () => {
-    isMounted = false;
-    clearInterval(interval);
-    socket?.disconnect();
-    socket = null;
-  };
-}, []);
+    loadInitialData().catch(() => {
+      if (isMounted) {
+        setConnected(false);
+      }
+    });
+
+    socket = io(API_BASE, {
+      path: "/socket.io",
+      transports: ["polling", "websocket"],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1500,
+      timeout: 20000,
+    });
+
+    socket.on("connect", () => {
+      if (isMounted) {
+        setConnected(true);
+      }
+    });
+
+    socket.on("connect_error", () => {
+      if (isMounted) {
+        setConnected(false);
+      }
+    });
+
+    socket.on("disconnect", () => {
+      if (isMounted) {
+        setConnected(false);
+      }
+    });
+
+    socket.on("update_ui", (data: Device[]) => {
+      if (!isMounted) {
+        return;
+      }
+
+      applyDeviceData(data);
+      setConnected(true);
+    });
+
+    socket.on("alerts_update", (data: AlertItem[]) => {
+      if (!isMounted) {
+        return;
+      }
+
+      setAlerts(data);
+    });
+
+    const interval = setInterval(async () => {
+      const summaryOk = await refreshSummary();
+      const devicesOk = await refreshDevices();
+      await refreshAlerts();
+
+      if (!summaryOk && !devicesOk && isMounted) {
+        setConnected(false);
+      }
+    }, 15000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+      socket?.disconnect();
+      socket = null;
+    };
+  }, []);
 
 
   const filteredDevices = devices.filter((device) => {
@@ -308,6 +378,11 @@ useEffect(() => {
     filteredDevices.find((device) => device.deviceId === selectedDeviceId) ??
     filteredDevices[0] ??
     null;
+  const connectionLabel = connected
+    ? "Backend connected"
+    : showingCachedData
+      ? "Showing cached data while backend wakes"
+      : "Waking backend...";
 
   async function triggerControl(action: string, value?: number) {
     if (!controlDeviceId && action !== controlActions.setRandomFailureRate) {
@@ -366,10 +441,10 @@ useEffect(() => {
               className={`rounded-full border px-4 py-2 text-sm ${
                 connected
                   ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-100"
-                  : "border-rose-300/20 bg-rose-300/10 text-rose-100"
+                  : "border-amber-300/20 bg-amber-300/10 text-amber-100"
               }`}
             >
-              {connected ? "Backend connected" : "Backend offline"}
+              {connectionLabel}
             </div>
 
             <button
@@ -383,6 +458,14 @@ useEffect(() => {
       </nav>
 
       <main className="mx-auto flex max-w-7xl flex-col gap-8 px-6 py-8">
+        {!connected ? (
+          <div className="rounded-3xl border border-amber-400/20 bg-amber-400/10 px-5 py-4 text-sm text-amber-100">
+            {showingCachedData
+              ? "The backend is waking up on Render free hosting. You are seeing the latest cached device data until live telemetry reconnects."
+              : "The backend is waking up on Render free hosting. Device data will appear automatically as soon as the service is ready."}
+          </div>
+        ) : null}
+
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
           {[
             ["Total devices", summary.totalDevices, <Cpu key="cpu" className="h-5 w-5 text-cyan-200" />],
@@ -516,7 +599,7 @@ useEffect(() => {
                   </p>
                   <h3 className="mt-2 text-lg font-semibold text-white">{selectedDevice.name}</h3>
                   <p className="mt-1 text-sm text-slate-400">
-                    {selectedDevice.deviceId} • {selectedDevice.location}
+                    {selectedDevice.deviceId} - {selectedDevice.location}
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <span className={`rounded-full border px-3 py-1 text-xs ${statusClasses(selectedDevice.status)}`}>

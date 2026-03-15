@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DEMO_USER } from "@/lib/demoAuth";
+import { waitForBackend } from "@/lib/backendWarmup";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -10,6 +11,59 @@ export default function LoginPage() {
   const [password, setPassword] = useState(DEMO_USER.password);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [backendReady, setBackendReady] = useState(false);
+  const [backendMessage, setBackendMessage] = useState(
+    "Checking backend status..."
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    async function warmBackend() {
+      setBackendMessage("Waking the live backend...");
+
+      const ready = await waitForBackend({
+        timeoutMs: 65000,
+        intervalMs: 2500,
+        onRetry: (_, elapsedMs) => {
+          if (!active) {
+            return;
+          }
+
+          const seconds = Math.max(1, Math.floor(elapsedMs / 1000));
+          setBackendMessage(
+            `Waking the live backend... ${seconds}s elapsed. Render free services can take around a minute to wake.`
+          );
+        },
+      });
+
+      if (!active) {
+        return;
+      }
+
+      setBackendReady(ready);
+      setBackendMessage(
+        ready
+          ? "Backend ready. You can sign in and the simulation should appear immediately."
+          : "Backend is still waking. You can still sign in, and the app will keep retrying."
+      );
+    }
+
+    warmBackend().catch(() => {
+      if (!active) {
+        return;
+      }
+
+      setBackendReady(false);
+      setBackendMessage(
+        "Could not confirm backend availability yet. The app will keep retrying after login."
+      );
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -24,14 +78,31 @@ export default function LoginPage() {
       body: JSON.stringify({ email, password }),
     });
 
-    setBusy(false);
-
     if (!response.ok) {
+      setBusy(false);
       const data = await response.json();
       setError(data.message || "Login failed");
       return;
     }
 
+    if (!backendReady) {
+      setBackendMessage("Preparing live simulation before opening the dashboard...");
+
+      const ready = await waitForBackend({
+        timeoutMs: 70000,
+        intervalMs: 2500,
+        onRetry: (_, elapsedMs) => {
+          const seconds = Math.max(1, Math.floor(elapsedMs / 1000));
+          setBackendMessage(
+            `Preparing live simulation... ${seconds}s elapsed.`
+          );
+        },
+      });
+
+      setBackendReady(ready);
+    }
+
+    setBusy(false);
     router.push("/");
     router.refresh();
   }
@@ -87,12 +158,22 @@ export default function LoginPage() {
               </div>
             ) : null}
 
+            <div
+              className={`rounded-2xl border px-4 py-3 text-sm ${
+                backendReady
+                  ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-100"
+                  : "border-amber-400/30 bg-amber-400/10 text-amber-100"
+              }`}
+            >
+              {backendMessage}
+            </div>
+
             <button
               type="submit"
               disabled={busy}
               className="w-full rounded-2xl bg-cyan-400 px-4 py-3 font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:opacity-60"
             >
-              {busy ? "Signing in..." : "Sign in"}
+              {busy ? "Preparing dashboard..." : "Sign in"}
             </button>
           </form>
         </section>
