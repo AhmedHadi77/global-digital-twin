@@ -26,9 +26,9 @@ import {
   YAxis,
 } from "recharts";
 import DigitalTwinScene from "@/components/DigitalTwinScene";
-import { API_BASE } from "@/lib/backendWarmup";
 import model from "@/lib/deviceModel";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
 const statusOptions = ["All", ...model.statusOptions];
 const locationOptions = ["All", ...model.locationOptions];
 const controlActions = model.controlActions;
@@ -87,46 +87,9 @@ interface ChartPoint {
   [key: string]: string | number | null;
 }
 
-interface DashboardCache {
-  summary: Summary;
-  devices: Device[];
-  alerts: AlertItem[];
-  history: ChartPoint[];
-  cachedAt: string;
-}
-
 let socket: Socket | null = null;
 
 const chartColors = ["#22d3ee", "#f59e0b", "#34d399", "#f97316", "#a78bfa", "#fb7185"];
-const DASHBOARD_CACHE_KEY = "gdt-dashboard-cache-v1";
-
-function readDashboardCache() {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  try {
-    const raw = window.localStorage.getItem(DASHBOARD_CACHE_KEY);
-
-    if (!raw) {
-      return null;
-    }
-
-    return JSON.parse(raw) as DashboardCache;
-  } catch {
-    return null;
-  }
-}
-
-function writeDashboardCache(cache: DashboardCache) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.localStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify(cache));
-  } catch {}
-}
 
 function statusClasses(status: Device["status"]) {
   return status === "Online"
@@ -166,7 +129,6 @@ export default function DashboardPage() {
   const [controlDeviceId, setControlDeviceId] = useState("");
   const [randomFailureRateInput, setRandomFailureRateInput] = useState(8);
   const [connected, setConnected] = useState(false);
-  const [showingCachedData, setShowingCachedData] = useState(false);
   const [controlMessage, setControlMessage] = useState("");
   const [controlBusy, setControlBusy] = useState(false);
 
@@ -190,7 +152,6 @@ export default function DashboardPage() {
 
   function applyDeviceData(data: Device[]) {
     setDevices(data);
-    setShowingCachedData(false);
 
     const nextPoint: ChartPoint = {
       time: new Date().toLocaleTimeString(),
@@ -238,39 +199,6 @@ export default function DashboardPage() {
       return false;
     }
   }
-
-  useEffect(() => {
-    const cached = readDashboardCache();
-
-    if (!cached) {
-      return;
-    }
-
-    setSummary(cached.summary);
-    setDevices(cached.devices);
-    setAlerts(cached.alerts);
-    setHistory(cached.history);
-    setSelectedDeviceId(cached.devices[0]?.deviceId ?? null);
-    setControlDeviceId(cached.devices[0]?.deviceId ?? "");
-    setRandomFailureRateInput(
-      Math.round(cached.summary.randomFailureRate * 100)
-    );
-    setShowingCachedData(true);
-  }, []);
-
-  useEffect(() => {
-    if (devices.length === 0 && alerts.length === 0 && history.length === 0) {
-      return;
-    }
-
-    writeDashboardCache({
-      summary,
-      devices,
-      alerts,
-      history,
-      cachedAt: new Date().toISOString(),
-    });
-  }, [alerts, devices, history, summary]);
 
   useEffect(() => {
     let isMounted = true;
@@ -378,11 +306,6 @@ export default function DashboardPage() {
     filteredDevices.find((device) => device.deviceId === selectedDeviceId) ??
     filteredDevices[0] ??
     null;
-  const connectionLabel = connected
-    ? "Backend connected"
-    : showingCachedData
-      ? "Showing cached data while backend wakes"
-      : "Waking backend...";
 
   async function triggerControl(action: string, value?: number) {
     if (!controlDeviceId && action !== controlActions.setRandomFailureRate) {
@@ -441,10 +364,10 @@ export default function DashboardPage() {
               className={`rounded-full border px-4 py-2 text-sm ${
                 connected
                   ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-100"
-                  : "border-amber-300/20 bg-amber-300/10 text-amber-100"
+                  : "border-rose-300/20 bg-rose-300/10 text-rose-100"
               }`}
             >
-              {connectionLabel}
+              {connected ? "Backend connected" : "Backend offline"}
             </div>
 
             <button
@@ -458,14 +381,6 @@ export default function DashboardPage() {
       </nav>
 
       <main className="mx-auto flex max-w-7xl flex-col gap-8 px-6 py-8">
-        {!connected ? (
-          <div className="rounded-3xl border border-amber-400/20 bg-amber-400/10 px-5 py-4 text-sm text-amber-100">
-            {showingCachedData
-              ? "The backend is waking up on Render free hosting. You are seeing the latest cached device data until live telemetry reconnects."
-              : "The backend is waking up on Render free hosting. Device data will appear automatically as soon as the service is ready."}
-          </div>
-        ) : null}
-
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
           {[
             ["Total devices", summary.totalDevices, <Cpu key="cpu" className="h-5 w-5 text-cyan-200" />],
