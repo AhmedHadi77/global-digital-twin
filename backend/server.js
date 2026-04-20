@@ -765,46 +765,61 @@ app.get("/devices/:deviceId/details", async (req, res) => {
     return;
   }
 
-  const readingsResult = await appPool.query(
-    `SELECT
-       id,
-       temperature::float AS temperature,
-       vibration::float AS vibration,
-       battery_level::float AS "batteryLevel",
-       status AS status,
-       health_status AS "healthStatus",
-       anomaly_state AS "anomalyState",
-       anomaly_reason AS "anomalyReason",
-       anomaly_score::float AS "anomalyScore",
-       created_at AS "createdAt"
-     FROM device_readings
-     WHERE device_id = $1
-     ORDER BY created_at DESC
-     LIMIT 24`,
-    [deviceId]
-  );
+  let readings = [];
+  let alerts = [];
 
-  const alertsResult = await appPool.query(
-    `SELECT
-       id,
-       alert_type AS "alertType",
-       severity,
-       title,
-       message,
-       is_active AS "isActive",
-       triggered_at AS "triggeredAt",
-       resolved_at AS "resolvedAt"
-     FROM alerts
-     WHERE device_id = $1
-     ORDER BY triggered_at DESC
-     LIMIT 24`,
-    [deviceId]
-  );
+  try {
+    const readingsResult = await appPool.query(
+      `SELECT
+         id,
+         temperature::float AS temperature,
+         vibration::float AS vibration,
+         battery_level::float AS "batteryLevel",
+         status AS status,
+         health_status AS "healthStatus",
+         anomaly_state AS "anomalyState",
+         anomaly_reason AS "anomalyReason",
+         anomaly_score::float AS "anomalyScore",
+         created_at AS "createdAt"
+       FROM device_readings
+       WHERE device_id = $1
+       ORDER BY created_at DESC
+       LIMIT 24`,
+      [deviceId]
+    );
+
+    readings = readingsResult.rows;
+  } catch (error) {
+    console.error("Load device readings failed:", error.message);
+  }
+
+  try {
+    const alertsResult = await appPool.query(
+      `SELECT
+         id,
+         alert_type AS "alertType",
+         severity,
+         title,
+         message,
+         is_active AS "isActive",
+         triggered_at AS "triggeredAt",
+         resolved_at AS "resolvedAt"
+       FROM alerts
+       WHERE device_id = $1
+       ORDER BY triggered_at DESC
+       LIMIT 24`,
+      [deviceId]
+    );
+
+    alerts = alertsResult.rows;
+  } catch (error) {
+    console.error("Load device alerts failed:", error.message);
+  }
 
   res.json({
     device: current,
-    readings: readingsResult.rows,
-    alerts: alertsResult.rows,
+    readings,
+    alerts,
   });
 });
 

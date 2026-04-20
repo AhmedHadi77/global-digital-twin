@@ -2,12 +2,11 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { DEMO_USER } from "@/lib/demoAuth";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState(DEMO_USER.email);
-  const [password, setPassword] = useState(DEMO_USER.password);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -32,7 +31,7 @@ export default function LoginPage() {
       return;
     }
 
-    router.push("/");
+    router.push("/dashboard");
     router.refresh();
   }
 
@@ -52,16 +51,9 @@ export default function LoginPage() {
             view.
           </p>
 
-          <div className="mt-8 grid gap-4 sm:grid-cols-2">
-            <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
-              <p className="text-sm text-slate-400">Demo email</p>
-              <p className="mt-2 font-mono text-cyan-100">{DEMO_USER.email}</p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
-              <p className="text-sm text-slate-400">Demo password</p>
-              <p className="mt-2 font-mono text-cyan-100">{DEMO_USER.password}</p>
-            </div>
-          </div>
+          <p className="mt-8 text-sm text-slate-400">
+            Sign in with your authorized dashboard account.
+          </p>
         </section>
 
         <section className="rounded-[2rem] border border-white/10 bg-slate-950/50 p-8">

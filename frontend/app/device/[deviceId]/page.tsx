@@ -95,35 +95,61 @@ export default function DeviceDetailsPage() {
   const [alerts, setAlerts] = useState<AlertHistory[]>([]);
   const [loading, setLoading] = useState(true);
 
-  async function loadDetails() {
-    const response = await fetch(`${API_BASE}/devices/${deviceId}/details`, {
-      cache: "no-store",
-    });
-
-    if (!response.ok) {
-      setLoading(false);
-      return;
-    }
-
-    const data = await response.json();
-    setDevice(data.device);
-    setReadings(data.readings || []);
-    setAlerts(data.alerts || []);
-    setLoading(false);
-  }
-
   useEffect(() => {
     if (!deviceId) {
       return;
     }
 
-    loadDetails().catch(() => setLoading(false));
+    let cancelled = false;
+
+    async function loadDetails() {
+      try {
+        const response = await fetch(
+          `${API_BASE}/devices/${encodeURIComponent(deviceId)}/details`,
+          {
+            cache: "no-store",
+          }
+        );
+
+        if (cancelled) {
+          return;
+        }
+
+        if (!response.ok) {
+          setDevice(null);
+          setReadings([]);
+          setAlerts([]);
+          setLoading(false);
+          return;
+        }
+
+        const data = await response.json();
+
+        if (cancelled) {
+          return;
+        }
+
+        setDevice(data.device);
+        setReadings(data.readings || []);
+        setAlerts(data.alerts || []);
+        setLoading(false);
+      } catch {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadDetails();
 
     const interval = setInterval(() => {
-      loadDetails().catch(() => {});
+      void loadDetails();
     }, 5000);
 
-    return () => clearInterval(interval);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [deviceId]);
 
   if (loading) {
@@ -156,7 +182,7 @@ export default function DeviceDetailsPage() {
       <div className="mx-auto flex max-w-7xl flex-col gap-8">
         <div className="flex items-center justify-between">
           <Link
-            href="/"
+            href="/dashboard"
             className="inline-flex items-center gap-2 rounded-full border border-white/15 px-4 py-2 text-sm text-slate-200"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -185,7 +211,7 @@ export default function DeviceDetailsPage() {
                 {device.name}
               </h1>
               <p className="mt-2 text-slate-400">
-                {device.deviceType} • {device.location}
+                {device.deviceType} - {device.location}
               </p>
 
               <div className="mt-4 flex flex-wrap gap-2">

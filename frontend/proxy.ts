@@ -6,10 +6,11 @@ export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (pathname === "/login" && session) {
-    return NextResponse.redirect(new URL("/", request.url));
+    return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
-  const protectedPath = pathname === "/" || pathname.startsWith("/device/");
+  const protectedPath =
+    pathname === "/dashboard" || pathname.startsWith("/device/");
 
   if (protectedPath && !session) {
     return NextResponse.redirect(new URL("/login", request.url));
@@ -19,5 +20,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/", "/login", "/device/:path*"],
+  matcher: ["/login", "/dashboard", "/device/:path*"],
 };
