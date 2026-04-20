@@ -26,9 +26,9 @@ import {
   YAxis,
 } from "recharts";
 import DigitalTwinScene from "@/components/DigitalTwinScene";
+import { API_BASE_URL, fetchFromApi } from "@/lib/apiBase";
 import model from "@/lib/deviceModel";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
 const statusOptions = ["All", ...model.statusOptions];
 const locationOptions = ["All", ...model.locationOptions];
 const controlActions = model.controlActions;
@@ -134,7 +134,9 @@ export default function DashboardPage() {
 
   async function refreshSummary() {
     try {
-      const response = await fetch(`${API_BASE}/summary`, { cache: "no-store" });
+      const response = await fetchFromApi("/summary", {
+        cache: "no-store",
+      });
 
       if (!response.ok) {
         return false;
@@ -152,6 +154,20 @@ export default function DashboardPage() {
 
   function applyDeviceData(data: Device[]) {
     setDevices(data);
+    setSummary((current) => ({
+      ...current,
+      totalDevices: data.length,
+      onlineDevices: data.filter((device) => device.status === "Online").length,
+      offlineDevices: data.filter((device) => device.status === "Offline")
+        .length,
+      criticalDevices: data.filter(
+        (device) => device.healthStatus === "CRITICAL"
+      ).length,
+      activeAlerts: data.reduce(
+        (total, device) => total + device.activeAlerts,
+        0
+      ),
+    }));
 
     const nextPoint: ChartPoint = {
       time: new Date().toLocaleTimeString(),
@@ -169,7 +185,9 @@ export default function DashboardPage() {
 
   async function refreshDevices() {
     try {
-      const response = await fetch(`${API_BASE}/devices`, { cache: "no-store" });
+      const response = await fetchFromApi("/devices", {
+        cache: "no-store",
+      });
 
       if (!response.ok) {
         return false;
@@ -186,7 +204,9 @@ export default function DashboardPage() {
 
   async function refreshAlerts() {
     try {
-      const response = await fetch(`${API_BASE}/alerts`, { cache: "no-store" });
+      const response = await fetchFromApi("/alerts", {
+        cache: "no-store",
+      });
 
       if (!response.ok) {
         return false;
@@ -194,6 +214,10 @@ export default function DashboardPage() {
 
       const data = await response.json();
       setAlerts(data);
+      setSummary((current) => ({
+        ...current,
+        activeAlerts: data.length,
+      }));
       return true;
     } catch {
       return false;
@@ -204,8 +228,10 @@ export default function DashboardPage() {
     let isMounted = true;
 
     async function loadInitialData() {
-      const summaryOk = await refreshSummary();
-      const devicesOk = await refreshDevices();
+      const [summaryOk, devicesOk] = await Promise.all([
+        refreshSummary(),
+        refreshDevices(),
+      ]);
       await refreshAlerts();
 
       if (!summaryOk && !devicesOk && isMounted) {
@@ -219,7 +245,7 @@ export default function DashboardPage() {
       }
     });
 
-    socket = io(API_BASE, {
+    socket = io(API_BASE_URL, {
       path: "/socket.io",
       transports: ["polling", "websocket"],
       reconnection: true,
@@ -264,8 +290,10 @@ export default function DashboardPage() {
     });
 
     const interval = setInterval(async () => {
-      const summaryOk = await refreshSummary();
-      const devicesOk = await refreshDevices();
+      const [summaryOk, devicesOk] = await Promise.all([
+        refreshSummary(),
+        refreshDevices(),
+      ]);
       await refreshAlerts();
 
       if (!summaryOk && !devicesOk && isMounted) {
@@ -315,7 +343,7 @@ export default function DashboardPage() {
     setControlBusy(true);
     setControlMessage("");
 
-    const response = await fetch(`${API_BASE}/simulate`, {
+    const response = await fetchFromApi("/simulate", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

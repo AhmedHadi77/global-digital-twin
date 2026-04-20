@@ -30,6 +30,7 @@ const ANOMALY = {
 
 const RUN_EMBEDDED_SIMULATOR =
   process.env.RUN_EMBEDDED_SIMULATOR === "true";
+const DB_QUERY_TIMEOUT_MS = Number(process.env.DB_QUERY_TIMEOUT_MS || 3500);
 
 const appPool = new Pool({
   user: process.env.DB_USER,
@@ -41,6 +42,11 @@ const appPool = new Pool({
     process.env.DB_SSL === "true"
       ? { rejectUnauthorized: false }
       : undefined,
+  connectionTimeoutMillis: Number(
+    process.env.DB_CONNECTION_TIMEOUT_MS || 5000
+  ),
+  statement_timeout: DB_QUERY_TIMEOUT_MS,
+  query_timeout: DB_QUERY_TIMEOUT_MS,
 });
 
 const rawOrigins = process.env.FRONTEND_URLS || "http://localhost:3000";
@@ -561,17 +567,34 @@ async function seedRegistry() {
 }
 
 async function getAnomaliesTodayCount() {
-  try {
-    const result = await appPool.query(
-      `SELECT COUNT(*)::int AS count
-       FROM alerts
-       WHERE alert_type = 'ANOMALY'
-         AND triggered_at::date = CURRENT_DATE`
-    );
+  const rows = await queryRowsWithTimeout(
+    `SELECT COUNT(*)::int AS count
+     FROM alerts
+     WHERE alert_type = 'ANOMALY'
+       AND triggered_at::date = CURRENT_DATE`,
+    [],
+    "Count today's anomalies"
+  );
 
-    return result.rows[0]?.count ?? 0;
+  return rows[0]?.count ?? 0;
+}
+
+async function queryRowsWithTimeout(queryText, params, label) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${DB_QUERY_TIMEOUT_MS}ms`));
+    }, DB_QUERY_TIMEOUT_MS);
+  });
+
+  try {
+    const result = await Promise.race([appPool.query(queryText, params), timeout]);
+    return result.rows;
   } catch (error) {
-    return 0;
+    console.error(`${label} failed:`, error.message);
+    return [];
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -765,11 +788,8 @@ app.get("/devices/:deviceId/details", async (req, res) => {
     return;
   }
 
-  let readings = [];
-  let alerts = [];
-
-  try {
-    const readingsResult = await appPool.query(
+  const [readings, alerts] = await Promise.all([
+    queryRowsWithTimeout(
       `SELECT
          id,
          temperature::float AS temperature,
@@ -785,16 +805,10 @@ app.get("/devices/:deviceId/details", async (req, res) => {
        WHERE device_id = $1
        ORDER BY created_at DESC
        LIMIT 24`,
-      [deviceId]
-    );
-
-    readings = readingsResult.rows;
-  } catch (error) {
-    console.error("Load device readings failed:", error.message);
-  }
-
-  try {
-    const alertsResult = await appPool.query(
+      [deviceId],
+      "Load device readings"
+    ),
+    queryRowsWithTimeout(
       `SELECT
          id,
          alert_type AS "alertType",
@@ -808,13 +822,10 @@ app.get("/devices/:deviceId/details", async (req, res) => {
        WHERE device_id = $1
        ORDER BY triggered_at DESC
        LIMIT 24`,
-      [deviceId]
-    );
-
-    alerts = alertsResult.rows;
-  } catch (error) {
-    console.error("Load device alerts failed:", error.message);
-  }
+      [deviceId],
+      "Load device alerts"
+    ),
+  ]);
 
   res.json({
     device: current,

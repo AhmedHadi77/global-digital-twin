@@ -21,9 +21,7 @@ import {
   YAxis,
 } from "recharts";
 import DigitalTwinScene from "@/components/DigitalTwinScene";
-
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
+import { fetchFromApi } from "@/lib/apiBase";
 
 interface Device {
   deviceId: string;
@@ -102,13 +100,35 @@ export default function DeviceDetailsPage() {
 
     let cancelled = false;
 
+    async function loadDeviceSnapshot() {
+      const response = await fetchFromApi("/devices", {
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        return false;
+      }
+
+      const devices = await response.json();
+      const currentDevice = devices.find(
+        (item: Device) => item.deviceId === deviceId
+      );
+
+      if (!currentDevice || cancelled) {
+        return false;
+      }
+
+      setDevice(currentDevice);
+      setReadings([]);
+      setAlerts([]);
+      return true;
+    }
+
     async function loadDetails() {
       try {
-        const response = await fetch(
-          `${API_BASE}/devices/${encodeURIComponent(deviceId)}/details`,
-          {
-            cache: "no-store",
-          }
+        const response = await fetchFromApi(
+          `/devices/${encodeURIComponent(deviceId)}/details`,
+          { cache: "no-store" }
         );
 
         if (cancelled) {
@@ -116,9 +136,12 @@ export default function DeviceDetailsPage() {
         }
 
         if (!response.ok) {
-          setDevice(null);
-          setReadings([]);
-          setAlerts([]);
+          const hasSnapshot = await loadDeviceSnapshot();
+          if (cancelled) {
+            return;
+          }
+
+          setDevice((current) => (hasSnapshot ? current : null));
           setLoading(false);
           return;
         }
@@ -135,6 +158,12 @@ export default function DeviceDetailsPage() {
         setLoading(false);
       } catch {
         if (!cancelled) {
+          const hasSnapshot = await loadDeviceSnapshot().catch(() => false);
+          if (cancelled) {
+            return;
+          }
+
+          setDevice((current) => (hasSnapshot ? current : null));
           setLoading(false);
         }
       }
