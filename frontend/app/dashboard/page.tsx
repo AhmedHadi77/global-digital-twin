@@ -1,11 +1,10 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
   BellRing,
-  Building2,
   Cpu,
   Gauge,
   Search,
@@ -109,6 +108,10 @@ function anomalyClasses(state: Device["anomalyState"]) {
     : "border-emerald-400/30 bg-emerald-400/10 text-emerald-100";
 }
 
+function isAnomalyAlert(alert: AlertItem) {
+  return alert.type === "ANOMALY";
+}
+
 export default function DashboardPage() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
@@ -132,7 +135,60 @@ export default function DashboardPage() {
   const [controlMessage, setControlMessage] = useState("");
   const [controlBusy, setControlBusy] = useState(false);
 
-  async function refreshSummary() {
+  const applyAlertData = useCallback((data: AlertItem[]) => {
+    const anomalyAlerts = data.filter(isAnomalyAlert).length;
+
+    setAlerts(data);
+    setSummary((current) => ({
+      ...current,
+      activeAlerts: data.length,
+      anomaliesDetectedToday: Math.max(
+        current.anomaliesDetectedToday,
+        anomalyAlerts
+      ),
+    }));
+  }, []);
+
+  const applyDeviceData = useCallback((data: Device[]) => {
+    const anomalyDevices = data.filter(
+      (device) => device.anomalyState === "ANOMALY"
+    ).length;
+
+    setDevices(data);
+    setSummary((current) => ({
+      ...current,
+      totalDevices: data.length,
+      onlineDevices: data.filter((device) => device.status === "Online").length,
+      offlineDevices: data.filter((device) => device.status === "Offline")
+        .length,
+      criticalDevices: data.filter(
+        (device) => device.healthStatus === "CRITICAL"
+      ).length,
+      activeAlerts: data.reduce(
+        (total, device) => total + device.activeAlerts,
+        0
+      ),
+      anomaliesDetectedToday: Math.max(
+        current.anomaliesDetectedToday,
+        anomalyDevices
+      ),
+    }));
+
+    const nextPoint: ChartPoint = {
+      time: new Date().toLocaleTimeString(),
+    };
+
+    data.forEach((device) => {
+      nextPoint[`${device.deviceId}_temperature`] = device.temperature;
+      nextPoint[`${device.deviceId}_battery`] = device.batteryLevel;
+    });
+
+    setHistory((prev) => [...prev.slice(-23), nextPoint]);
+    setSelectedDeviceId((current) => current ?? data[0]?.deviceId ?? null);
+    setControlDeviceId((current) => current || data[0]?.deviceId || "");
+  }, []);
+
+  const refreshSummary = useCallback(async () => {
     try {
       const response = await fetchFromApi("/summary", {
         cache: "no-store",
@@ -150,40 +206,9 @@ export default function DashboardPage() {
     } catch {
       return false;
     }
-  }
+  }, []);
 
-  function applyDeviceData(data: Device[]) {
-    setDevices(data);
-    setSummary((current) => ({
-      ...current,
-      totalDevices: data.length,
-      onlineDevices: data.filter((device) => device.status === "Online").length,
-      offlineDevices: data.filter((device) => device.status === "Offline")
-        .length,
-      criticalDevices: data.filter(
-        (device) => device.healthStatus === "CRITICAL"
-      ).length,
-      activeAlerts: data.reduce(
-        (total, device) => total + device.activeAlerts,
-        0
-      ),
-    }));
-
-    const nextPoint: ChartPoint = {
-      time: new Date().toLocaleTimeString(),
-    };
-
-    data.forEach((device) => {
-      nextPoint[`${device.deviceId}_temperature`] = device.temperature;
-      nextPoint[`${device.deviceId}_battery`] = device.batteryLevel;
-    });
-
-    setHistory((prev) => [...prev.slice(-23), nextPoint]);
-    setSelectedDeviceId((current) => current ?? data[0]?.deviceId ?? null);
-    setControlDeviceId((current) => current || data[0]?.deviceId || "");
-  }
-
-  async function refreshDevices() {
+  const refreshDevices = useCallback(async () => {
     try {
       const response = await fetchFromApi("/devices", {
         cache: "no-store",
@@ -200,9 +225,9 @@ export default function DashboardPage() {
     } catch {
       return false;
     }
-  }
+  }, [applyDeviceData]);
 
-  async function refreshAlerts() {
+  const refreshAlerts = useCallback(async () => {
     try {
       const response = await fetchFromApi("/alerts", {
         cache: "no-store",
@@ -213,16 +238,12 @@ export default function DashboardPage() {
       }
 
       const data = await response.json();
-      setAlerts(data);
-      setSummary((current) => ({
-        ...current,
-        activeAlerts: data.length,
-      }));
+      applyAlertData(data);
       return true;
     } catch {
       return false;
     }
-  }
+  }, [applyAlertData]);
 
   useEffect(() => {
     let isMounted = true;
@@ -286,7 +307,7 @@ export default function DashboardPage() {
         return;
       }
 
-      setAlerts(data);
+      applyAlertData(data);
     });
 
     const interval = setInterval(async () => {
@@ -307,7 +328,7 @@ export default function DashboardPage() {
       socket?.disconnect();
       socket = null;
     };
-  }, []);
+  }, [applyAlertData, applyDeviceData, refreshAlerts, refreshDevices, refreshSummary]);
 
 
   const filteredDevices = devices.filter((device) => {
@@ -330,6 +351,22 @@ export default function DashboardPage() {
   const chartDevices = filteredDevices.slice(0, 4);
   const visibleDeviceIds = new Set(filteredDevices.map((device) => device.deviceId));
   const visibleAlerts = alerts.filter((alert) => visibleDeviceIds.has(alert.deviceId));
+  const activeAnomalyAlerts = alerts.filter(isAnomalyAlert);
+  const anomalyDeviceCount = devices.filter(
+    (device) => device.anomalyState === "ANOMALY"
+  ).length;
+  const displayedAnomalyCount = Math.max(
+    summary.anomaliesDetectedToday,
+    activeAnomalyAlerts.length,
+    anomalyDeviceCount
+  );
+  const prioritizedAlerts = [...visibleAlerts].sort((a, b) => {
+    if (isAnomalyAlert(a) !== isAnomalyAlert(b)) {
+      return isAnomalyAlert(a) ? -1 : 1;
+    }
+
+    return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+  });
   const selectedDevice =
     filteredDevices.find((device) => device.deviceId === selectedDeviceId) ??
     filteredDevices[0] ??
@@ -363,7 +400,9 @@ export default function DashboardPage() {
     }
 
     setControlMessage("Simulation updated");
-    refreshSummary().catch(() => {});
+    void Promise.all([refreshSummary(), refreshDevices(), refreshAlerts()]).catch(
+      () => {}
+    );
   }
 
   async function logout() {
@@ -416,7 +455,7 @@ export default function DashboardPage() {
             ["Offline", summary.offlineDevices, <WifiOff key="wifioff" className="h-5 w-5 text-rose-200" />],
             ["Critical", summary.criticalDevices, <ShieldAlert key="shield" className="h-5 w-5 text-amber-200" />],
             ["Active alerts", summary.activeAlerts, <BellRing key="bell" className="h-5 w-5 text-rose-200" />],
-            ["Anomalies today", summary.anomaliesDetectedToday, <AlertTriangle key="anomaly" className="h-5 w-5 text-orange-200" />],
+            ["Anomalies", displayedAnomalyCount, <AlertTriangle key="anomaly" className="h-5 w-5 text-orange-200" />],
           ].map(([label, value, icon]) => (
             <div key={String(label)} className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
               <div className="mb-4 flex items-center justify-between">
@@ -564,14 +603,37 @@ export default function DashboardPage() {
                 </div>
               ) : null}
             </div>
+          </div>
+        </section>
 
-            <div className="rounded-[2rem] border border-white/10 bg-slate-950/45 p-6">
-              <h2 className="text-xl font-semibold text-white">Failure simulation controls</h2>
+        <section className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+          <div className="rounded-[2rem] border border-white/10 bg-slate-950/45 p-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.25em] text-cyan-200/70">
+                  Operations lab
+                </p>
+                <h2 className="mt-2 text-xl font-semibold text-white">
+                  Failure simulation controls
+                </h2>
+                <p className="mt-2 max-w-xl text-sm text-slate-400">
+                  Inject controlled faults and validate alert behavior against a
+                  selected device.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-orange-400/20 bg-orange-400/10 px-4 py-2 text-sm text-orange-100">
+                {displayedAnomalyCount} anomalies
+              </div>
+            </div>
 
+            <label className="mt-5 block">
+              <span className="text-xs uppercase tracking-[0.22em] text-slate-500">
+                Target device
+              </span>
               <select
                 value={controlDeviceId}
                 onChange={(event) => setControlDeviceId(event.target.value)}
-                className="mt-4 w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-white outline-none"
+                className="mt-2 w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-white outline-none"
               >
                 {devices.map((device) => (
                   <option key={device.deviceId} value={device.deviceId} className="bg-slate-950">
@@ -579,92 +641,134 @@ export default function DashboardPage() {
                   </option>
                 ))}
               </select>
+            </label>
 
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <button onClick={() => triggerControl(controlActions.triggerOffline)} disabled={controlBusy} className="rounded-2xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-100">
-                  Trigger Offline
-                </button>
-                <button onClick={() => triggerControl(controlActions.triggerOverheat)} disabled={controlBusy} className="rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
-                  Trigger Overheat
-                </button>
-                <button onClick={() => triggerControl(controlActions.triggerLowBattery)} disabled={controlBusy} className="rounded-2xl border border-yellow-400/30 bg-yellow-400/10 px-4 py-3 text-sm text-yellow-100">
-                  Trigger Low Battery
-                </button>
-                <button onClick={() => triggerControl(controlActions.triggerTempSpike)} disabled={controlBusy} className="rounded-2xl border border-orange-400/30 bg-orange-400/10 px-4 py-3 text-sm text-orange-100">
-                  Trigger Temp Spike
-                </button>
-              </div>
-
-              <button
-                onClick={() => triggerControl(controlActions.recoverDevice)}
-                disabled={controlBusy}
-                className="mt-3 w-full rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100"
-              >
-                Recover Device
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <button onClick={() => triggerControl(controlActions.triggerOffline)} disabled={controlBusy} className="rounded-2xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm font-semibold text-rose-100 transition hover:bg-rose-400/15 disabled:opacity-60">
+                Trigger Offline
               </button>
-
-              <div className="mt-5">
-                <div className="flex items-center justify-between text-sm text-slate-300">
-                  <span>Random failure rate</span>
-                  <span>{randomFailureRateInput}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="50"
-                  value={randomFailureRateInput}
-                  onChange={(event) => setRandomFailureRateInput(Number(event.target.value))}
-                  className="mt-3 w-full"
-                />
-                <button
-                  onClick={() =>
-                    triggerControl(controlActions.setRandomFailureRate, randomFailureRateInput)
-                  }
-                  disabled={controlBusy}
-                  className="mt-3 w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white"
-                >
-                  Apply failure rate
-                </button>
-              </div>
-
-              {controlMessage ? (
-                <div className="mt-4 rounded-2xl border border-cyan-300/20 bg-cyan-300/10 px-4 py-3 text-sm text-cyan-100">
-                  {controlMessage}
-                </div>
-              ) : null}
+              <button onClick={() => triggerControl(controlActions.triggerOverheat)} disabled={controlBusy} className="rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm font-semibold text-amber-100 transition hover:bg-amber-400/15 disabled:opacity-60">
+                Trigger Overheat
+              </button>
+              <button onClick={() => triggerControl(controlActions.triggerLowBattery)} disabled={controlBusy} className="rounded-2xl border border-yellow-400/30 bg-yellow-400/10 px-4 py-3 text-sm font-semibold text-yellow-100 transition hover:bg-yellow-400/15 disabled:opacity-60">
+                Trigger Low Battery
+              </button>
+              <button onClick={() => triggerControl(controlActions.triggerTempSpike)} disabled={controlBusy} className="rounded-2xl border border-orange-400/30 bg-orange-400/10 px-4 py-3 text-sm font-semibold text-orange-100 transition hover:bg-orange-400/15 disabled:opacity-60">
+                Trigger Temp Spike
+              </button>
             </div>
 
-            <div className="rounded-[2rem] border border-white/10 bg-slate-950/45 p-6">
-              <h2 className="text-xl font-semibold text-white">Live alert panel</h2>
-              <div className="mt-4 space-y-3">
-                {visibleAlerts.length === 0 ? (
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-10 text-center text-slate-300">
-                    No active alerts in the current filter view
-                  </div>
-                ) : (
-                  visibleAlerts.slice(0, 6).map((alert) => (
-                    <div
-                      key={alert.id}
-                      className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
-                    >
-                      <div className="flex items-center justify-between gap-4">
-                        <div>
-                          <p className="text-xs uppercase tracking-[0.25em] text-slate-500">
-                            {alert.deviceId}
-                          </p>
-                          <h3 className="mt-2 text-base font-semibold text-white">
-                            {alert.title}
-                          </h3>
-                        </div>
-                        <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-200">
-                          {alert.type}
-                        </span>
-                      </div>
-                      <p className="mt-2 text-sm text-slate-300">{alert.message}</p>
-                    </div>
-                  ))
-                )}
+            <button
+              onClick={() => triggerControl(controlActions.recoverDevice)}
+              disabled={controlBusy}
+              className="mt-3 w-full rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-400/15 disabled:opacity-60"
+            >
+              Recover Device
+            </button>
+
+            <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="flex items-center justify-between text-sm text-slate-300">
+                <span>Random failure rate</span>
+                <span>{randomFailureRateInput}%</span>
               </div>
+              <input
+                type="range"
+                min="0"
+                max="50"
+                value={randomFailureRateInput}
+                onChange={(event) => setRandomFailureRateInput(Number(event.target.value))}
+                className="mt-3 w-full"
+              />
+              <button
+                onClick={() =>
+                  triggerControl(controlActions.setRandomFailureRate, randomFailureRateInput)
+                }
+                disabled={controlBusy}
+                className="mt-3 w-full rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/[0.06] disabled:opacity-60"
+              >
+                Apply failure rate
+              </button>
+            </div>
+
+            {controlMessage ? (
+              <div className="mt-4 rounded-2xl border border-cyan-300/20 bg-cyan-300/10 px-4 py-3 text-sm text-cyan-100">
+                {controlMessage}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="rounded-[2rem] border border-white/10 bg-slate-950/45 p-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.25em] text-cyan-200/70">
+                  Alert operations
+                </p>
+                <h2 className="mt-2 text-xl font-semibold text-white">
+                  Live alert panel
+                </h2>
+                <p className="mt-2 max-w-xl text-sm text-slate-400">
+                  Anomalies are promoted first so abnormal behavior is visible
+                  immediately.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-center text-sm">
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    Alerts
+                  </p>
+                  <p className="mt-1 text-lg font-semibold text-white">
+                    {visibleAlerts.length}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-orange-400/20 bg-orange-400/10 px-4 py-2">
+                  <p className="text-xs uppercase tracking-[0.18em] text-orange-200/70">
+                    Anomaly
+                  </p>
+                  <p className="mt-1 text-lg font-semibold text-orange-50">
+                    {activeAnomalyAlerts.length}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              {prioritizedAlerts.length === 0 ? (
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-10 text-center text-slate-300">
+                  No active alerts in the current filter view
+                </div>
+              ) : (
+                prioritizedAlerts.slice(0, 6).map((alert) => (
+                  <div
+                    key={alert.id}
+                    className={`rounded-2xl border p-4 ${
+                      isAnomalyAlert(alert)
+                        ? "border-orange-400/25 bg-orange-400/10"
+                        : "border-white/10 bg-white/[0.03]"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.25em] text-slate-500">
+                          {alert.deviceId}
+                        </p>
+                        <h3 className="mt-2 text-base font-semibold text-white">
+                          {alert.title}
+                        </h3>
+                      </div>
+                      <span
+                        className={`rounded-full border px-3 py-1 text-xs ${
+                          isAnomalyAlert(alert)
+                            ? "border-orange-300/30 text-orange-100"
+                            : "border-white/10 text-slate-200"
+                        }`}
+                      >
+                        {alert.type}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-300">{alert.message}</p>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </section>

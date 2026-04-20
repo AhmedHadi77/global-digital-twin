@@ -663,7 +663,25 @@ async function processTelemetry(payload) {
   }
 
   const reading = simulated.reading;
-  const anomaly = detectAnomaly(payload.deviceId, reading);
+  const override = getOverride(payload.deviceId);
+  let anomaly = detectAnomaly(payload.deviceId, reading);
+
+  if (!anomaly && override.forceTempSpike) {
+    anomaly = {
+      score: 1.8,
+      reason:
+        "Injected temperature spike moved telemetry outside the expected operating baseline.",
+    };
+  }
+
+  if (!anomaly && override.forceOverheat) {
+    anomaly = {
+      score: 1.5,
+      reason:
+        "Forced overheat condition pushed device temperature beyond the normal operating range.",
+    };
+  }
+
   const healthStatus = calculateHealth(
     reading.temperature,
     reading.batteryLevel
