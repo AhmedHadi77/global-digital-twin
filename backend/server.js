@@ -298,10 +298,103 @@ function pushRecentReading(deviceId, reading) {
       temperature: reading.temperature,
       vibration: reading.vibration,
       batteryLevel: reading.batteryLevel,
+      status: reading.status,
+      healthStatus: reading.healthStatus,
+      anomalyState: reading.anomalyState,
+      anomalyReason: reading.anomalyReason,
+      anomalyScore: reading.anomalyScore,
+      createdAt: reading.createdAt ?? new Date().toISOString(),
     },
   ].slice(-thresholds.historyLimit);
 
   recentReadings.set(deviceId, next);
+}
+
+function buildLiveReading(device, reading, index) {
+  const createdAt =
+    reading.createdAt ??
+    device.lastUpdate ??
+    new Date(Date.now() - index * 1500).toISOString();
+
+  return {
+    id: `live-${device.deviceId}-${createdAt}`,
+    temperature: reading.temperature,
+    vibration: reading.vibration,
+    batteryLevel: reading.batteryLevel,
+    status: reading.status ?? device.status,
+    healthStatus: reading.healthStatus ?? device.healthStatus,
+    anomalyState: reading.anomalyState ?? device.anomalyState,
+    anomalyReason: reading.anomalyReason ?? device.anomalyReason,
+    anomalyScore: reading.anomalyScore ?? device.anomalyScore,
+    createdAt,
+  };
+}
+
+function getLiveReadingHistory(device) {
+  const history = recentReadings.get(device.deviceId) ?? [];
+  const readings = history
+    .map((reading, index) => buildLiveReading(device, reading, index))
+    .reverse();
+
+  if (
+    device.lastUpdate &&
+    !readings.some((reading) => reading.createdAt === device.lastUpdate)
+  ) {
+    readings.unshift(
+      buildLiveReading(
+        device,
+        {
+          temperature: device.temperature,
+          vibration: device.vibration,
+          batteryLevel: device.batteryLevel,
+          status: device.status,
+          healthStatus: device.healthStatus,
+          anomalyState: device.anomalyState,
+          anomalyReason: device.anomalyReason,
+          anomalyScore: device.anomalyScore,
+          createdAt: device.lastUpdate,
+        },
+        0
+      )
+    );
+  }
+
+  if (readings.length === 0) {
+    readings.push(
+      buildLiveReading(
+        device,
+        {
+          temperature: device.temperature,
+          vibration: device.vibration,
+          batteryLevel: device.batteryLevel,
+          status: device.status,
+          healthStatus: device.healthStatus,
+          anomalyState: device.anomalyState,
+          anomalyReason: device.anomalyReason,
+          anomalyScore: device.anomalyScore,
+          createdAt: device.lastUpdate ?? new Date().toISOString(),
+        },
+        0
+      )
+    );
+  }
+
+  return readings.slice(0, 24);
+}
+
+function getLiveAlertHistory(deviceId) {
+  return getAlertsSnapshot()
+    .filter((alert) => alert.deviceId === deviceId)
+    .map((alert) => ({
+      id: alert.id,
+      alertType: alert.type,
+      severity: alert.severity,
+      title: alert.title,
+      message: alert.message,
+      isActive: true,
+      triggeredAt: alert.triggeredAt,
+      resolvedAt: null,
+    }));
 }
 
 async function persistDeviceSnapshot(device) {
@@ -705,7 +798,7 @@ async function processTelemetry(payload) {
   };
 
   virtualDevices.set(baseDevice.deviceId, nextState);
-  pushRecentReading(baseDevice.deviceId, reading);
+  pushRecentReading(baseDevice.deviceId, nextState);
 
   await persistReading(buildDeviceSnapshot(nextState));
   await emitSnapshots();
@@ -806,7 +899,7 @@ app.get("/devices/:deviceId/details", async (req, res) => {
     return;
   }
 
-  const [readings, alerts] = await Promise.all([
+  const [storedReadings, storedAlerts] = await Promise.all([
     queryRowsWithTimeout(
       `SELECT
          id,
@@ -844,6 +937,27 @@ app.get("/devices/:deviceId/details", async (req, res) => {
       "Load device alerts"
     ),
   ]);
+
+  const liveAlerts = getLiveAlertHistory(deviceId);
+  const alertKeys = new Set(
+    liveAlerts.map((alert) => `${alert.alertType}:${alert.title}`)
+  );
+  const alerts = [
+    ...liveAlerts,
+    ...storedAlerts.filter((alert) => {
+      const key = `${alert.alertType}:${alert.title}`;
+
+      if (alertKeys.has(key)) {
+        return false;
+      }
+
+      alertKeys.add(key);
+      return true;
+    }),
+  ].slice(0, 24);
+
+  const readings =
+    storedReadings.length > 0 ? storedReadings : getLiveReadingHistory(current);
 
   res.json({
     device: current,

@@ -41,7 +41,7 @@ interface Device {
 }
 
 interface Reading {
-  id: number;
+  id: number | string;
   temperature: number;
   vibration: number;
   batteryLevel: number;
@@ -54,7 +54,7 @@ interface Reading {
 }
 
 interface AlertHistory {
-  id: number;
+  id: number | string;
   alertType: string;
   severity: string;
   title: string;
@@ -80,6 +80,77 @@ function healthClasses(status: Device["healthStatus"]) {
   }
 
   return "border-cyan-300/30 bg-cyan-300/10 text-cyan-100";
+}
+
+function createLiveReading(device: Device): Reading {
+  const createdAt = device.lastUpdate ?? new Date().toISOString();
+
+  return {
+    id: `live-${device.deviceId}-${createdAt}`,
+    temperature: device.temperature,
+    vibration: device.vibration,
+    batteryLevel: device.batteryLevel,
+    status: device.status,
+    healthStatus: device.healthStatus,
+    anomalyState: device.anomalyState,
+    anomalyReason: device.anomalyReason,
+    anomalyScore: device.anomalyScore,
+    createdAt,
+  };
+}
+
+function mergeLiveReadings(
+  history: Reading[],
+  device: Device,
+  previous: Reading[]
+) {
+  const latest = createLiveReading(device);
+  const source = history.length > 0 ? history : previous;
+  const seen = new Set<string>();
+
+  return [latest, ...source]
+    .filter((reading) => {
+      const key = String(reading.createdAt);
+
+      if (seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 24);
+}
+
+function createLiveAnomalyAlert(device: Device): AlertHistory | null {
+  if (device.anomalyState !== "ANOMALY") {
+    return null;
+  }
+
+  return {
+    id: `live-anomaly-${device.deviceId}`,
+    alertType: "ANOMALY",
+    severity: device.anomalyScore >= 1.6 ? "critical" : "high",
+    title: `${device.name} anomaly detected`,
+    message:
+      device.anomalyReason ??
+      "Live telemetry moved outside the expected operating baseline.",
+    isActive: true,
+    triggeredAt: device.lastUpdate ?? new Date().toISOString(),
+    resolvedAt: null,
+  };
+}
+
+function mergeLiveAlerts(history: AlertHistory[], device: Device) {
+  const liveAnomaly = createLiveAnomalyAlert(device);
+
+  if (!liveAnomaly) {
+    return history;
+  }
+
+  const hasAnomaly = history.some((alert) => alert.alertType === "ANOMALY");
+
+  return hasAnomaly ? history : [liveAnomaly, ...history].slice(0, 24);
 }
 
 export default function DeviceDetailsPage() {
@@ -119,8 +190,8 @@ export default function DeviceDetailsPage() {
       }
 
       setDevice(currentDevice);
-      setReadings([]);
-      setAlerts([]);
+      setReadings((current) => mergeLiveReadings([], currentDevice, current));
+      setAlerts(mergeLiveAlerts([], currentDevice));
       return true;
     }
 
@@ -153,8 +224,10 @@ export default function DeviceDetailsPage() {
         }
 
         setDevice(data.device);
-        setReadings(data.readings || []);
-        setAlerts(data.alerts || []);
+        setReadings((current) =>
+          mergeLiveReadings(data.readings || [], data.device, current)
+        );
+        setAlerts(mergeLiveAlerts(data.alerts || [], data.device));
         setLoading(false);
       } catch {
         if (!cancelled) {
@@ -314,7 +387,7 @@ export default function DeviceDetailsPage() {
                       name="Temperature"
                       stroke="#22d3ee"
                       strokeWidth={2}
-                      dot={false}
+                      dot={{ r: 3 }}
                     />
                     <Line
                       type="monotone"
@@ -322,7 +395,7 @@ export default function DeviceDetailsPage() {
                       name="Battery"
                       stroke="#f59e0b"
                       strokeWidth={2}
-                      dot={false}
+                      dot={{ r: 3 }}
                     />
                   </LineChart>
                 </ResponsiveContainer>
