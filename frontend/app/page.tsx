@@ -62,10 +62,10 @@ export default function HomePage() {
 
           <div className="flex gap-3">
             <Link
-              href="/login"
+              href="/dashboard"
               className="rounded-full bg-cyan-400 px-5 py-3 font-semibold text-slate-950 transition hover:bg-cyan-300"
             >
-              Open Demo
+              Open Dashboard
             </Link>
             <a
               href="https://github.com/AhmedHadi77/global-digital-twin"
@@ -137,8 +137,8 @@ export default function HomePage() {
 
             <div className="mt-8 rounded-2xl border border-cyan-300/20 bg-cyan-300/10 p-5">
               <p className="text-sm text-cyan-100">
-                This public page is optimized for search indexing. The live
-                operational dashboard remains protected behind login.
+                This public page is optimized for search indexing, and the live
+                operational dashboard is available directly from the demo.
               </p>
             </div>
           </section>

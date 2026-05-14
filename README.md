@@ -10,11 +10,6 @@ This project combines a live dashboard, a real-time backend, PostgreSQL persiste
 - Backend Health: [https://global-digital-twin-backend.onrender.com/health](https://global-digital-twin-backend.onrender.com/health)
 - Repository: [https://github.com/AhmedHadi77/global-digital-twin](https://github.com/AhmedHadi77/global-digital-twin)
 
-Demo login:
-
-- Email: `admin@zenith.local`
-- Password: `admin123`
-
 Note: the backend is hosted on Render free tier, so the first request may take a short time while the service wakes up.
 
 ## Why I Built This
@@ -24,7 +19,7 @@ Industrial dashboards are often shown as static mockups. I wanted to build a wor
 - multiple devices streaming telemetry
 - persistent historical readings and alerts
 - anomaly detection and fault simulation
-- a protected dashboard with device-level drilldowns
+- a public dashboard with device-level drilldowns
 - a 3D visual layer for operational monitoring
 
 ## Key Features
@@ -42,7 +37,6 @@ Industrial dashboards are often shown as static mockups. I wanted to build a wor
   - trigger temperature spike
   - recover device
   - set random failure rate
-- Demo authentication with protected frontend routes
 - HTTP polling fallback plus Socket.IO updates for more reliable hosted demos
 
 ## Architecture
@@ -113,9 +107,8 @@ global-digital-twin/
 ### Frontend
 
 - Dashboard with filters, KPIs, charts, alerts, controls, and 3D scene
-- Login page with demo auth flow
 - Dynamic device details pages at `/device/[deviceId]`
-- Proxy-based route protection for authenticated screens
+- Public dashboard and device detail screens
 
 ### Backend
 
@@ -239,7 +232,7 @@ npm run dev
 
 Open:
 
-- [http://localhost:3000/login](http://localhost:3000/login)
+- [http://localhost:3000/dashboard](http://localhost:3000/dashboard)
 
 If you want to run the simulator from inside the backend instead, set:
 
@@ -277,7 +270,7 @@ To keep the project deployable on free services, the simulator can run inside th
 
 ## Roadmap
 
-- Role-based authentication
+- Optional role-based access control
 - Alert acknowledgement workflow
 - Historical analytics pages
 - Docker-based local orchestration

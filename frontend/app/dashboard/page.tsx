@@ -405,14 +405,6 @@ export default function DashboardPage() {
     );
   }
 
-  async function logout() {
-    await fetch("/api/auth/logout", {
-      method: "POST",
-    });
-
-    window.location.href = "/login";
-  }
-
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(61,217,184,0.12),_transparent_34%),linear-gradient(180deg,_#08131b_0%,_#04090e_100%)] text-slate-100">
       <nav className="sticky top-0 z-40 border-b border-white/10 bg-slate-950/70 backdrop-blur-xl">
@@ -426,23 +418,14 @@ export default function DashboardPage() {
             </h1>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div
-              className={`rounded-full border px-4 py-2 text-sm ${
-                connected
-                  ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-100"
-                  : "border-rose-300/20 bg-rose-300/10 text-rose-100"
-              }`}
-            >
-              {connected ? "Backend connected" : "Backend offline"}
-            </div>
-
-            <button
-              onClick={logout}
-              className="rounded-full border border-white/15 px-4 py-2 text-sm text-slate-200"
-            >
-              Logout
-            </button>
+          <div
+            className={`rounded-full border px-4 py-2 text-sm ${
+              connected
+                ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-100"
+                : "border-rose-300/20 bg-rose-300/10 text-rose-100"
+            }`}
+          >
+            {connected ? "Backend connected" : "Backend offline"}
           </div>
         </div>
       </nav>

@@ -68,7 +68,7 @@ Hosted free services can sleep, so I added HTTP polling fallback on the frontend
 
 ## Features Shown to Recruiters
 
-- secure login flow for demo access
+- public demo access to the live dashboard
 - live fleet summary dashboard
 - device filtering and status views
 - device details pages
